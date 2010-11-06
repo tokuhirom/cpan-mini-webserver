@@ -31,7 +31,6 @@ Template::Declare->init(
 );
 
 has 'directory'           => ( is => 'rw', isa => 'Path::Class::Dir' );
-has 'scratch'             => ( is => 'rw', isa => 'Path::Class::Dir' );
 has 'author_type'         => ( is => 'rw' );
 has 'parse_cpan_authors'  => ( is => 'rw' );
 has 'parse_cpan_packages' => ( is => 'rw', isa => 'Parse::CPAN::Packages' );
@@ -114,9 +113,6 @@ sub setup {
 
     $self->parse_cpan_authors($parse_cpan_authors);
     $self->parse_cpan_packages($parse_cpan_packages);
-
-    my $scratch = dir( $cache->scratch );
-    $self->scratch($scratch);
 
     infof("get index");
     my $index = $cache->get_code( 'index',
