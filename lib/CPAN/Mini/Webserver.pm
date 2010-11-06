@@ -29,8 +29,6 @@ our $REQUEST;
 Template::Declare->init(
     roots => [
         'CPAN::Mini::Webserver::Templates',
-        'CPAN::Mini::Webserver::Templates::CSS',
-        'CPAN::Mini::Webserver::Templates::Images',
     ]
 );
 
