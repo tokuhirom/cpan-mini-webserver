@@ -4,8 +4,6 @@ use Archive::Peek;
 use CPAN::Mini::App;
 use CPAN::Mini::Webserver::Index;
 use CPAN::Mini::Webserver::Templates;
-use CPAN::Mini::Webserver::Templates::CSS;
-use CPAN::Mini::Webserver::Templates::Images;
 use Encode;
 use File::Spec::Functions qw(canonpath);
 use File::Type;
@@ -99,20 +97,20 @@ sub setup {
     my $whois_filename = file( $directory, 'authors', '00whois.xml' );
     my $parse_cpan_authors;
     if ( -f $whois_filename ) {
-        infof("do parse_cpan_whois");
+        infof("get parse_cpan_whois cache");
         $self->author_type('Whois');
         $parse_cpan_authors = $cache->get_code( 'parse_cpan_whois',
-            sub { Parse::CPAN::Whois->new( $whois_filename->stringify ) } );
+            sub { infof("do Parse::CPAN::Whois"); Parse::CPAN::Whois->new( $whois_filename->stringify ) } );
     } else {
-        infof("do parse_cpan_authors");
+        infof("get parse_cpan_authors cache");
         $self->author_type('Authors');
         $parse_cpan_authors = $cache->get_code( 'parse_cpan_authors',
-            sub { Parse::CPAN::Authors->new( $authors_filename->stringify ) }
+            sub { infof("do Parse::CPAN::Authors"); Parse::CPAN::Authors->new( $authors_filename->stringify ) }
         );
     }
-    infof("do parse_cpan_packages");
+    infof("get parse_cpan_packages");
     my $parse_cpan_packages = $cache->get_code( 'parse_cpan_packages',
-        sub { Parse::CPAN::Packages->new( $packages_filename->stringify ) } );
+        sub { infof("do Parse::CPAN::Packages"); Parse::CPAN::Packages->new( $packages_filename->stringify ) } );
 
     $self->parse_cpan_authors($parse_cpan_authors);
     $self->parse_cpan_packages($parse_cpan_packages);
@@ -120,9 +118,10 @@ sub setup {
     my $scratch = dir( $cache->scratch );
     $self->scratch($scratch);
 
-    infof("do create index");
+    infof("get index");
     my $index = $cache->get_code( 'index',
         sub {
+            infof("do index");
             my $x = CPAN::Mini::Webserver::Index->new;
             $x->create_index( $parse_cpan_authors, $parse_cpan_packages );
             $x;
