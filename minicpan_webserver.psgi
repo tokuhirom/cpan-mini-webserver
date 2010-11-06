@@ -3,13 +3,30 @@ use strict;
 use warnings;
 use lib 'lib';
 use CPAN::Mini::Webserver;
-use Getopt::Long;
+use Plack::Loader;
+use CGI::Emulate::PSGI;
+use Plack::Request;
+use Plack::Middleware::ContentLength;
+use Plack::Builder;
+use Data::Dumper;
 
-my $port = 2963;
-GetOptions( "port=i" => \$port, );
+$|++;
 
-my $server = CPAN::Mini::Webserver->new($port);
-$server->run();
+print "BEFORE SETUP\n";
+my $server = CPAN::Mini::Webserver->new();
+$server->setup();
+print "AFTER SETUP\n";
+
+$Data::Dumper::Maxdepth = 1;
+
+builder {
+    enable "ContentLength";
+
+    sub {
+        my $req = Plack::Request->new(shift);
+        $server->handle_request($req);
+    };
+};
 
 __END__
 

@@ -11,10 +11,8 @@ WriteMakefile(
     PREREQ_PM    => {
         'App::Cache'               => '0',
         'Archive::Peek'            => '0.33',
-        'CGI'                      => '3.16',
         'CPAN::Mini'               => '0.565',
         'File::Type'               => '0',
-        'HTTP::Server::Simple'     => '0.34',
         'IO::Capture::Stdout'      => '0',
         'List::MoreUtils'          => '0',
         'MIME::Base64'             => '0',
@@ -33,6 +31,9 @@ WriteMakefile(
         'Template::Declare'        => '0.29',
         'Test::More'               => '0',
         'Text::Unidecode'          => '0',
+		'Plack::Loader'            => '0',
+		'CGI::Emulate::PSGI'       => '0',
+		'HTTP::Date'               => '0',
     },
     'EXE_FILES' => ['bin/minicpan_webserver'],
 );

@@ -21,6 +21,10 @@ use Path::Class;
 use PPI;
 use PPI::HTML;
 use Template::Declare;
+use Log::Minimal;
+use HTTP::Date ();
+
+our $REQUEST;
 
 Template::Declare->init(
     roots => [
@@ -30,14 +34,6 @@ Template::Declare->init(
     ]
 );
 
-if ( eval { require HTTP::Server::Simple::Bonjour } ) {
-    extends 'HTTP::Server::Simple::Bonjour', 'HTTP::Server::Simple::CGI';
-} else {
-    extends 'HTTP::Server::Simple::CGI';
-}
-
-has 'hostname'            => ( is => 'rw' );
-has 'cgi'                 => ( is => 'rw', isa => 'CGI' );
 has 'directory'           => ( is => 'rw', isa => 'Path::Class::Dir' );
 has 'scratch'             => ( is => 'rw', isa => 'Path::Class::Dir' );
 has 'author_type'         => ( is => 'rw' );
@@ -49,10 +45,6 @@ has 'filename'            => ( is => 'rw' );
 has 'index' => ( is => 'rw', isa => 'CPAN::Mini::Webserver::Index' );
 
 our $VERSION = '0.45';
-
-sub service_name {
-    "$ENV{USER}'s minicpan_webserver";
-}
 
 sub get_file_from_tarball {
     my ( $self, $distribution, $filename ) = @_;
@@ -89,27 +81,10 @@ sub checksum_data_for_author {
     return $checksum;
 }
 
-sub send_http_header {
-    my $self   = shift;
-    my $code   = shift;
-    my %params = @_;
-    my $cgi    = $self->cgi;
-
-    if (   ( defined $params{-charset} and $params{-charset} eq 'utf-8' )
-        or ( defined $params{-type} and $params{-type} eq 'text/xml' ) )
-    {
-        binmode( STDOUT, ":encoding(utf-8)" );
-    } elsif ( defined $params{-type} ) {
-        binmode STDOUT, ":raw";
-    }
-    print "HTTP/1.0 $code\015\012";
-    print $cgi->header(%params);
-}
-
-# this is a hook that HTTP::Server::Simple calls after setting up the
-# listening socket. we use it load the indexes
-sub after_setup_listener {
+sub setup {
     my $self      = shift;
+    infof("start setup");
+
     my %config    = CPAN::Mini->read_config;
     my $directory = dir( glob $config{local} );
     $self->directory($directory);
@@ -126,15 +101,18 @@ sub after_setup_listener {
     my $whois_filename = file( $directory, 'authors', '00whois.xml' );
     my $parse_cpan_authors;
     if ( -f $whois_filename ) {
+        infof("do parse_cpan_whois");
         $self->author_type('Whois');
         $parse_cpan_authors = $cache->get_code( 'parse_cpan_whois',
             sub { Parse::CPAN::Whois->new( $whois_filename->stringify ) } );
     } else {
+        infof("do parse_cpan_authors");
         $self->author_type('Authors');
         $parse_cpan_authors = $cache->get_code( 'parse_cpan_authors',
             sub { Parse::CPAN::Authors->new( $authors_filename->stringify ) }
         );
     }
+    infof("do parse_cpan_packages");
     my $parse_cpan_packages = $cache->get_code( 'parse_cpan_packages',
         sub { Parse::CPAN::Packages->new( $packages_filename->stringify ) } );
 
@@ -144,25 +122,26 @@ sub after_setup_listener {
     my $scratch = dir( $cache->scratch );
     $self->scratch($scratch);
 
-    my $index = CPAN::Mini::Webserver::Index->new;
+    infof("do create index");
+    my $index = $cache->get_code( 'index',
+        sub {
+            my $x = CPAN::Mini::Webserver::Index->new;
+            $x->create_index( $parse_cpan_authors, $parse_cpan_packages );
+            $x;
+        }
+    );
     $self->index($index);
-    $index->create_index( $parse_cpan_authors, $parse_cpan_packages );
+
+    infof("finished setup");
 }
 
 sub handle_request {
-    my ( $self, $cgi ) = @_;
-    eval { $self->_handle_request($cgi) };
-    if ($@) {
-        $self->send_http_header(500);
-        print "<h1>Internal Server Error</h1>", $cgi->escapeHTML($@);
-    }
-}
+    my ( $self, $req ) = @_;
 
-sub _handle_request {
-    my ( $self, $cgi ) = @_;
-    $self->cgi($cgi);
-    $self->hostname( $cgi->virtual_host() );
-    my $path = $cgi->path_info();
+    local $REQUEST = $req;
+
+    my $path = $req->path_info();
+    debugf("access to $path");
 
     # $raw, $download and $install should become $action?
     my ($raw,       $install,  $download, $pauseid,
@@ -190,27 +169,27 @@ sub _handle_request {
     # warn "$path / $raw / $download / $pauseid / $distvname / $filename";
 
     if ( $path eq '/' ) {
-        $self->index_page();
+        $self->index_page($req);
     } elsif ( $path eq '/search/' ) {
-        $self->search_page();
+        $self->search_page($req);
     } elsif ( $raw && $pauseid && $distvname && $filename ) {
-        $self->raw_page();
+        $self->raw_page($req);
     } elsif ( $install && $pauseid && $distvname && $filename ) {
-        $self->install_page();
+        $self->install_page($req);
     } elsif ( $download && $pauseid && $distvname ) {
-        $self->download_file();
+        $self->download_file($req);
     } elsif ( $pauseid && $distvname && $filename ) {
-        $self->file_page();
+        $self->file_page($req);
     } elsif ( $pauseid && $distvname ) {
-        $self->distribution_page();
+        $self->distribution_page($req);
     } elsif ($pauseid) {
-        $self->author_page();
+        $self->author_page($req);
     } elsif ( $path =~ m{^/perldoc} ) {
-        $self->pod_page();
+        $self->pod_page($req);
     } elsif ( $path =~ m{^/dist/} ) {
-        $self->dist_page();
+        $self->dist_page($req);
     } elsif ( $path =~ m{^/package/} ) {
-        $self->package_page();
+        $self->package_page($req);
     } elsif ($prefix) {
         $self->download_cpan($prefix);
     } elsif ( $path eq '/static/css/screen.css' ) {
@@ -236,6 +215,15 @@ sub _handle_request {
 
 }
 
+sub render_td {
+    my ($self, $tmpl, $params) = @_;
+    debugf("rendering '$tmpl'");
+    my $html = Template::Declare->show(
+        $tmpl => $params
+    );
+    return [200, ['Content-Type' => 'text/html; charset=utf-8'], [$html]];
+}
+
 sub index_page {
     my $self = shift;
 
@@ -252,8 +240,7 @@ sub index_page {
             push @recent, $d;
         }
     }
-    $self->send_http_header( 200, -charset => 'utf-8' );
-    print Template::Declare->show(
+    return $self->render_td(
         'index',
         {   recents            => \@recent,
             parse_cpan_authors => $self->parse_cpan_authors,
@@ -265,8 +252,7 @@ sub not_found_page {
     my $self = shift;
     my $q    = shift;
     my ( $authors, $dists, $packages ) = $self->_do_search($q);
-    $self->send_http_header( 404, -charset => 'utf-8' );
-    print Template::Declare->show(
+    my $html = Template::Declare->show(
         '404',
         {   parse_cpan_authors => $self->parse_cpan_authors,
             q                  => $q,
@@ -275,25 +261,34 @@ sub not_found_page {
             packages           => $packages
         }
     );
+    [404, ['Content-Type' => 'text/html; charset=utf-8'], [$html]];
 }
 
 sub redirect {
-    my $self = shift;
-    my $url  = shift;
+    my ($self, $location) = @_;
 
-    print "HTTP/1.0 302\015\012";
-    print $self->cgi->redirect($url);
-
+    my $url = do {
+        if ( $location =~ m{^https?://} ) {
+            $location;
+        }
+        else {
+            my $url = $REQUEST->base;
+            $url      =~ s{/+$}{};
+            $location =~ s{^/+([^/])}{/$1};
+            $url .= $location;
+        }
+    };
+    debugf("redirect to $url");
+    return [302, ['Location' => $url], []];
 }
 
 sub search_page {
-    my $self = shift;
-    my $q    = $self->cgi->param('q');
+    my ($self, $req) = @_;
+    my $q    = $req->param('q');
     Encode::_utf8_on($q);    # we know that we have sent utf-8
 
     my ( $authors, $dists, $packages ) = $self->_do_search($q);
-    $self->send_http_header( 200, -charset => 'utf-8' );
-    print Template::Declare->show(
+    return $self->render_td(
         'search',
         {   parse_cpan_authors => $self->parse_cpan_authors,
             q                  => $q,
@@ -364,8 +359,7 @@ sub author_page {
         }
     }
 
-    $self->send_http_header( 200, -charset => 'utf-8' );
-    print Template::Declare->show(
+    return $self->render_td(
         'author',
         {   author        => $author,
             pauseid       => $pauseid,
@@ -398,8 +392,7 @@ sub distribution_page {
 
     my @filenames = $self->list_files($distribution);
 
-    $self->send_http_header( 200, -charset => 'utf-8' );
-    print Template::Declare->show(
+    return $self->render_td(
         'distribution',
         {   author       => $self->parse_cpan_authors->author( uc $pauseid ),
             distribution => $distribution,
@@ -413,8 +406,8 @@ sub distribution_page {
 }
 
 sub pod_page {
-    my $self = shift;
-    my ($pkgname) = $self->cgi->keywords;
+    my ($self, $req) = @_;
+    my ($pkgname) = $req->env->{QUERY_STRING};
 
     my $m = $self->parse_cpan_packages->package($pkgname);
     my $d = $m->distribution;
@@ -422,7 +415,7 @@ sub pod_page {
     my ( $pauseid, $distvname ) = ( $d->cpanid, $d->distvname );
     my $url = "/package/$pauseid/$distvname/$pkgname/";
 
-    $self->redirect($url);
+    return $self->redirect($url);
 }
 
 sub install_page {
@@ -436,6 +429,8 @@ sub install_page {
 
     my $file
         = file( $self->directory, 'authors', 'id', $distribution->prefix );
+
+    die "NOT IMPLEMENTED YET";
 
     $self->send_http_header(200);
     printf '<html><body><h1>Installing %s</h1><pre>',
@@ -463,9 +458,7 @@ sub file_page {
     my $contents = $self->get_file_from_tarball( $distribution, $filename );
 
     my $parser = Pod::Simple::HTML->new;
-    my $port   = $self->port;
-    my $host   = $self->hostname;
-    $parser->perldoc_url_prefix("http://$host:$port/perldoc?");
+    $parser->perldoc_url_prefix($REQUEST->base() . "/perldoc?");
     $parser->index(0);
     $parser->no_whining(1);
     $parser->no_errata_section(1);
@@ -477,8 +470,7 @@ sub file_page {
 #   $html
 #       =~ s/^(.*%3A%3A.*)$/my $x = $1; ($x =~ m{indexItem}) ? 1 : $x =~ s{%3A%3A}{\/}g; $x/gme;
 
-    $self->send_http_header( 200, -charset => 'utf-8' );
-    print Template::Declare->show(
+    return $self->render_td(
         'file',
         {   author       => $self->parse_cpan_authors->author( uc $pauseid ),
             distribution => $distribution,
@@ -506,19 +498,17 @@ sub download_file {
     if ($filename) {
         my $contents
             = $self->get_file_from_tarball( $distribution, $filename );
-        $self->send_http_header(
-            200,
-            -content_type   => 'text/plain',
-            -content_length => length $contents,
-        );
-        print $contents;
+        return [200,
+            ['Content-Type' => 'text/plain'],
+            [$contents]];
     } else {
         return $self->redirect($prefix);
     }
 }
 
 sub raw_page {
-    my $self      = shift;
+    my ($self, $req) = @_;
+    debugf("show raw_page");
     my $pauseid   = $self->pauseid;
     my $distvname = $self->distvname;
     my $filename  = $self->filename;
@@ -554,8 +544,8 @@ sub raw_page {
         $_ =~ s{<br>}{}g foreach @lines;
 
         # link module names to ourselves
-        my $port = $self->port;
-        my $host = $self->hostname;
+        my $port = $req->uri->port;
+        my $host = $req->uri->host;
         @lines = map {
             $_
                 =~ s{<span class="word">([^<]+?::[^<]+?)</span>}{<span class="word"><a href="http://$host:$port/perldoc?$1">$1</a></span>};
@@ -564,8 +554,7 @@ sub raw_page {
         $html = join '', @lines;
     }
 
-    $self->send_http_header( 200, -charset => 'utf-8' );
-    print Template::Declare->show(
+    return $self->render_td(
         'raw',
         {   author       => $self->parse_cpan_authors->author( uc $pauseid ),
             distribution => $distribution,
@@ -579,19 +568,19 @@ sub raw_page {
 }
 
 sub dist_page {
-    my $self = shift;
-    my ($dist) = $self->cgi->path_info =~ m{^/dist/(.+?)$};
+    my ($self, $req) = @_;
+    my ($dist) = $req->path_info =~ m{^/dist/(.+?)$};
     my $latest = $self->parse_cpan_packages->latest_distribution($dist);
     if ($latest) {
-        $self->redirect( "/~" . $latest->cpanid . "/" . $latest->distvname );
+        return $self->redirect( "/~" . $latest->cpanid . "/" . $latest->distvname );
     } else {
         $self->not_found_page($dist);
     }
 }
 
 sub package_page {
-    my $self = shift;
-    my $path = $self->cgi->path_info();
+    my ($self, $req) = @_;
+    my $path = $req->path_info();
     my ( $pauseid, $distvname, $package )
         = $path =~ m{^/package/(.+?)/(.+?)/(.+?)/$};
 
@@ -607,11 +596,9 @@ sub package_page {
     $postfix .= '.pm';
     my ($filename) = grep { $_ =~ /$postfix$/ }
         sort { length($a) <=> length($b) } @filenames;
-    my $port = $self->port;
-    my $host = $self->hostname;
-    my $url  = "http://$host:$port/~$pauseid/$distvname/$filename";
+    my $url  = "/~$pauseid/$distvname/$filename";
 
-    $self->redirect($url);
+    return $self->redirect($url);
 }
 
 sub download_cpan {
@@ -625,17 +612,15 @@ sub download_cpan {
     my $content_type = $file_type->checktype_filename($file);
     $content_type = 'text/plain' unless $file->basename =~ /\./;
 
-    $self->send_http_header(
+    return [
         200,
-        -content_type        => $content_type,
-        -content_disposition => "attachment; filename=" . $file->basename,
-        -content_length      => -s $fh,
-    );
-    while (<$fh>) {
-        print;
-    }
-    $fh->close;
-
+        [
+            'Content-Type'        => $content_type,
+            'Content-Disposition' => "attachment; filename=" . $file->basename,
+            'Content-Length'      => -s $fh
+        ],
+        $fh
+    ];
 }
 
 sub list_files {
@@ -652,13 +637,14 @@ sub direct_to_template {
     my $template = shift;
     my $mime     = shift;
 
-    $self->send_http_header(
+    return [
         200,
-        -expires => '+1d',
-        ( $mime ? ( -type => $mime ) : () ),
-    );
-
-    print Template::Declare->show($template);
+        [
+            Expires => HTTP::Date::time2str( time() + 24 * 60 * 60 ),
+            ( $mime ? ( 'Content-Type' => $mime ) : () )
+        ],
+        [Template::Declare->show($template)]
+    ];
 }
 
 1;
