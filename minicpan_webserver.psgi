@@ -20,7 +20,10 @@ print "AFTER SETUP\n";
 $Data::Dumper::Maxdepth = 1;
 
 builder {
-    enable "ContentLength";
+    enable "Plack::Middleware::ContentLength";
+    enable "Plack::Middleware::Static",
+        path => qr{^(?:/static/|favicon\.ico)}, root => 'htdocs/';
+
 
     sub {
         my $req = Plack::Request->new(shift);

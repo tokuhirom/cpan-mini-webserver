@@ -192,18 +192,6 @@ sub handle_request {
         $self->package_page($req);
     } elsif ($prefix) {
         $self->download_cpan($prefix);
-    } elsif ( $path eq '/static/css/screen.css' ) {
-        $self->direct_to_template( "css_screen", "text/css" );
-    } elsif ( $path eq '/static/css/print.css' ) {
-        $self->direct_to_template( "css_print", "text/css" );
-    } elsif ( $path eq '/static/css/ie.css' ) {
-        $self->direct_to_template( "css_ie", "text/css" );
-    } elsif ( $path eq '/static/images/logo.png' ) {
-        $self->direct_to_template( "images_logo", "image/png" );
-    } elsif ( $path eq '/static/images/favicon.png' ) {
-        $self->direct_to_template( "images_favicon", "image/png" );
-    } elsif ( $path eq '/favicon.ico' ) {
-        $self->direct_to_template( "images_favicon", "image/png" );
     } elsif ( $path eq '/static/xml/opensearch.xml' ) {
         $self->direct_to_template( "opensearch",
             "application/opensearchdescription+xml",
