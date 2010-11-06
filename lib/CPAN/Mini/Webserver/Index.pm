@@ -1,5 +1,5 @@
 package CPAN::Mini::Webserver::Index;
-use Moose;
+use Mouse;
 use List::MoreUtils qw(uniq);
 use Search::QueryParser;
 use String::CamelCase qw(wordsplit);

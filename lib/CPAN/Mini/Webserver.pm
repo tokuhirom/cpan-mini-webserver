@@ -11,7 +11,7 @@ use File::Spec::Functions qw(canonpath);
 use File::Type;
 use List::MoreUtils qw(uniq);
 use Module::InstalledVersion;
-use Moose;
+use Mouse;
 use Parse::CPAN::Authors;
 use Parse::CPAN::Packages;
 use Parse::CPAN::Whois;

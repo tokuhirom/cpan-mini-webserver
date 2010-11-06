@@ -19,7 +19,7 @@ WriteMakefile(
         'List::MoreUtils'          => '0',
         'MIME::Base64'             => '0',
         'Module::InstalledVersion' => '0',
-        'Moose'                    => '0',
+        'Mouse'                    => '0',
         'Parse::CPAN::Authors'     => '0',
         'Parse::CPAN::Whois'       => '0.02',
         'Parse::CPAN::Meta'        => '0',
